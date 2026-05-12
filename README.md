@@ -168,3 +168,16 @@ downloads/
 **ساخته شده با ❤️ برای جامعه برنامه‌نویسان ایرانی**
 
 [← مشاهده دانلودها](./downloads)
+
+## Download Status
+
+| Metric | Value |
+|--------|-------|
+| Total Downloads | 1 files |
+| Folders | 1 |
+| Last Updated | 2026-05-12 06:07:16 UTC |
+
+[View Downloads](./downloads)
+
+---
+
