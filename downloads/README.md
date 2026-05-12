@@ -1,13 +1,15 @@
-# 📁 Downloads Index
+# 📁 Downloads Folder
 
-This folder contains all downloaded and processed files.
+This folder is currently empty.
 
-## Download Summary
+## How to Download
 
-| Folder | Status |
-|--------|--------|
-| [mhrv-rs-windows-amd64](./mhrv-rs-windows-amd64/) | ✅ Ready |
+1. Go to the **Actions** tab
+2. Select **"⬇️ دانلود فایل"** workflow
+3. Click **"Run workflow"**
+4. Enter your download URLs
+5. Click **"Run workflow"**
 
 ---
 
-*Last updated: 2026-05-12 06:07:16 UTC*
+*Last cleaned: $(date '+%Y-%m-%d %H:%M:%S UTC')*
