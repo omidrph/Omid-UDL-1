@@ -1,0 +1,156 @@
+name: 🧹 پاک کردن دانلودها
+
+on:
+  workflow_dispatch:
+    inputs:
+      warning:
+        description: '⚠️ هشدار: این عمل تمام فایل‌های داخل پوشه downloads/ را حذف می‌کند. برای تایید "confirm" وارد کنید'
+        required: true
+        default: ''
+        type: string
+
+jobs:
+  clean:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.warning == 'confirm'
+    timeout-minutes: 10
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Clean downloads folder
+        run: |
+          echo "=========================================="
+          echo "🧹 شروع پاک کردن پوشه دانلودها"
+          echo "=========================================="
+          
+          # Check current size before deletion
+          if [ -d "downloads" ]; then
+            CURRENT_SIZE=$(du -sh downloads 2>/dev/null | cut -f1 || echo "unknown")
+            FILE_COUNT=$(find downloads -type f 2>/dev/null | wc -l)
+            echo "📊 Before cleanup:"
+            echo "  📁 Size: $CURRENT_SIZE"
+            echo "  📄 Files: $FILE_COUNT"
+            echo ""
+          fi
+          
+          # Remove downloads folder from git and filesystem
+          if [ -d "downloads" ]; then
+            echo "🗑️ Removing downloads folder..."
+            git rm -rf downloads/ 2>/dev/null || true
+            rm -rf downloads/ 2>/dev/null || true
+          fi
+          
+          # Create fresh empty downloads folder
+          mkdir -p downloads
+          
+          # Create a clean README
+          cat > downloads/README.md << 'EOF'
+          # 📁 Downloads Folder
+          
+          This folder is currently empty.
+          
+          ## How to Download
+          
+          1. Go to the **Actions** tab
+          2. Select **"⬇️ دانلود فایل"** workflow
+          3. Click **"Run workflow"**
+          4. Enter your download URLs
+          5. Click **"Run workflow"**
+          
+          ---
+          
+          *Last cleaned: $(date '+%Y-%m-%d %H:%M:%S UTC')*
+          EOF
+          
+          # Add the new README
+          git add -f downloads/README.md
+          
+          # Commit changes
+          if git diff --cached --quiet; then
+            echo "ℹ️ No changes to commit (folder was already empty)"
+            exit 0
+          fi
+          
+          git commit -m "🧹 Clean downloads folder [skip ci]"
+          
+          echo "📤 Pushing changes..."
+
+      - name: Push with retry
+        run: |
+          BRANCH="${GITHUB_REF_NAME}"
+          
+          MAX_RETRIES=5
+          RETRY_DELAY=5
+          
+          for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
+            echo "🔄 Push attempt $attempt of $MAX_RETRIES..."
+            
+            if timeout 60 git push origin HEAD:"$BRANCH" 2>&1; then
+              echo ""
+              echo "=========================================="
+              echo "✅ پوشه دانلودها با موفقیت پاک شد"
+              echo "=========================================="
+              echo ""
+              echo "📁 Downloads folder is now empty and ready for new downloads"
+              exit 0
+            else
+              echo "⚠️ Push failed, attempt $attempt of $MAX_RETRIES"
+              
+              if [ $attempt -lt $MAX_RETRIES ]; then
+                echo "🔄 Fetching latest changes and retrying..."
+                git fetch origin "$BRANCH" --quiet 2>/dev/null || true
+                git reset --hard origin/"$BRANCH" 2>/dev/null || true
+                
+                # Re-create empty folder structure
+                mkdir -p downloads
+                cat > downloads/README.md << 'EOF'
+          # 📁 Downloads Folder
+          
+          This folder is currently empty.
+          
+          ---
+          *Ready for new downloads*
+          EOF
+                
+                git add -f downloads/README.md
+                git commit -m "🧹 Clean downloads folder [skip ci]" 2>/dev/null || true
+                
+                echo "⏳ Waiting ${RETRY_DELAY} seconds before retry..."
+                sleep $RETRY_DELAY
+                RETRY_DELAY=$((RETRY_DELAY * 2))
+              fi
+            fi
+          done
+          
+          echo "❌ Failed to push after $MAX_RETRIES attempts"
+          exit 1
+
+      - name: Show error if confirmation not provided
+        if: github.event.inputs.warning != 'confirm'
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "⚠️ عملیات پاک کردن انجام نشد"
+          echo "=========================================="
+          echo ""
+          echo "برای پاک کردن فایل‌ها، باید در فیلد warning کلمه 'confirm' را وارد کنید."
+          echo ""
+          echo "مراحل:"
+          echo "  1. روی 'Run workflow' کلیک کنید"
+          echo "  2. در کادر warning بنویسید: confirm"
+          echo "  3. دوباره روی 'Run workflow' کلیک کنید"
+          echo ""
+          echo "=========================================="
+          exit 1
