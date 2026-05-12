@@ -21,9 +21,6 @@ on:
         default: ''
         type: string
 
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
-
 jobs:
   download-job:
     runs-on: ubuntu-latest
@@ -320,7 +317,7 @@ jobs:
         if: github.event.inputs.mode == 'normal'
         run: |
           ZIP_PASSWORD="${{ github.event.inputs.password }}"
-          SPLIT_SIZE_MB="${{ github.event.inputs.split_size || 45 }}"
+          SPLIT_SIZE_MB="45"
           SPLIT_THRESHOLD_BYTES=$(( SPLIT_SIZE_MB * 1024 * 1024 ))
           
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
@@ -515,7 +512,7 @@ jobs:
         if: github.event.inputs.mode == 'zip'
         run: |
           ZIP_PASSWORD="${{ github.event.inputs.password }}"
-          SPLIT_SIZE_MB="${{ github.event.inputs.split_size || 45 }}"
+          SPLIT_SIZE_MB="45"
           TIMESTAMP=$(date +%Y%m%d_%H%M%S)
           FOLDER_NAME="archive_${TIMESTAMP}"
           
@@ -721,262 +718,56 @@ jobs:
 
           echo "README.md updated with download links"
 
-      - name: Incremental Commit & Push
+      - name: Commit and push files
         run: |
           BRANCH="${GITHUB_REF_NAME}"
           BACKUP_DIR=$(cat /tmp/backup_dir_path.txt)
 
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "📤 Starting Incremental Push Process"
+          echo "📤 Committing and pushing files"
           echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-          BACKUP_FILE_COUNT=$(find "$BACKUP_DIR" -type f 2>/dev/null | wc -l)
-          echo "📁 Files to push: $BACKUP_FILE_COUNT"
-
-          if [ "$BACKUP_FILE_COUNT" -eq 0 ]; then
-            DOWNLOAD_FILE_COUNT=$(find downloads -type f 2>/dev/null | wc -l)
-            if [ "$DOWNLOAD_FILE_COUNT" -eq 0 ]; then
-              echo "ℹ️ Nothing to push"
-              exit 0
-            fi
-          fi
-
-          urlencode() {
-            python3 -c "import urllib.parse, sys; print(urllib.parse.quote(sys.argv[1], safe=''))" "$1"
-          }
-
-          regenerate_downloads_readme() {
-            DOWNLOADS_README="downloads/README.md"
-            {
-              echo "# 📁 Downloaded Files"
-              echo ""
-              echo "## File List"
-              echo ""
-            } > "$DOWNLOADS_README"
-
-            for folder in downloads/*/; do
-              [ -d "$folder" ] || continue
-              FOLDER_NAME=$(basename "$folder")
-              [ -f "$folder/README.md" ] || continue
-              FOLDER_ENCODED=$(urlencode "$FOLDER_NAME")
-              echo "- [${FOLDER_NAME}](./${FOLDER_ENCODED}/)" >> "$DOWNLOADS_README"
-            done
-
-            {
-              echo ""
-              echo "---"
-              echo "*Updated: $(date '+%Y-%m-%d %H:%M:%S UTC')*"
-            } >> "$DOWNLOADS_README"
-          }
-
-          push_batch() {
-            local BATCH_SIZE=3
-            local FILES=("$@")
-            local BATCH_COUNT=0
-            local BATCH_FILES=()
-            local TOTAL_PUSHED=0
-            local TOTAL_FILES=${#FILES[@]}
-
-            for FILE in "${FILES[@]}"; do
-              BATCH_FILES+=("$FILE")
-              BATCH_COUNT=$((BATCH_COUNT + 1))
-
-              if [ $BATCH_COUNT -ge $BATCH_SIZE ]; then
-                TOTAL_PUSHED=$((TOTAL_PUSHED + BATCH_COUNT))
-                echo ">>> Pushing batch ($TOTAL_PUSHED/$TOTAL_FILES files)..."
-
-                git fetch origin "$BRANCH" --quiet 2>/dev/null || true
-                git reset --hard origin/"$BRANCH" 2>/dev/null || true
-
-                mkdir -p downloads
-                cp -r "$BACKUP_DIR"/* downloads/ 2>/dev/null || true
-
-                for BF in "${BATCH_FILES[@]}"; do
-                  git add -f "$BF" 2>/dev/null || true
-                done
-
-                if ! git diff --cached --quiet 2>/dev/null; then
-                  git commit -m "Add batch of $BATCH_COUNT files [skip ci]" --quiet 2>/dev/null || true
-
-                  local PUSH_RETRY=0
-                  local PUSH_SUCCESS=false
-                  while [ $PUSH_RETRY -lt 5 ]; do
-                    PUSH_RETRY=$((PUSH_RETRY + 1))
-                    if timeout 180 git push origin HEAD:"$BRANCH" 2>&1; then
-                      PUSH_SUCCESS=true
-                      echo "    ✅ Batch pushed successfully!"
-                      break
-                    else
-                      echo "    ⚠️ Batch push failed, attempt $PUSH_RETRY/5..."
-                      git fetch origin "$BRANCH" --quiet 2>/dev/null || true
-                      git reset --hard origin/"$BRANCH" 2>/dev/null || true
-                      mkdir -p downloads
-                      cp -r "$BACKUP_DIR"/* downloads/ 2>/dev/null || true
-                      for BF in "${BATCH_FILES[@]}"; do
-                        git add -f "$BF" 2>/dev/null || true
-                      done
-                      if ! git diff --cached --quiet 2>/dev/null; then
-                        git commit -m "Add batch of $BATCH_COUNT files [skip ci]" --quiet 2>/dev/null || true
-                      fi
-                      sleep $((3 + RANDOM % 7))
-                    fi
-                  done
-                fi
-
-                BATCH_FILES=()
-                BATCH_COUNT=0
-                sleep 2
-              fi
-            done
-
-            if [ ${#BATCH_FILES[@]} -gt 0 ]; then
-              TOTAL_PUSHED=$((TOTAL_PUSHED + ${#BATCH_FILES[@]}))
-              echo ">>> Pushing final batch ($TOTAL_PUSHED/$TOTAL_FILES files)..."
-
-              git fetch origin "$BRANCH" --quiet 2>/dev/null || true
-              git reset --hard origin/"$BRANCH" 2>/dev/null || true
-              mkdir -p downloads
-              cp -r "$BACKUP_DIR"/* downloads/ 2>/dev/null || true
-
-              for BF in "${BATCH_FILES[@]}"; do
-                git add -f "$BF" 2>/dev/null || true
-              done
-
-              if ! git diff --cached --quiet 2>/dev/null; then
-                git commit -m "Add final batch [skip ci]" --quiet 2>/dev/null || true
-
-                local PUSH_RETRY=0
-                while [ $PUSH_RETRY -lt 5 ]; do
-                  PUSH_RETRY=$((PUSH_RETRY + 1))
-                  if timeout 180 git push origin HEAD:"$BRANCH" 2>&1; then
-                    echo "    ✅ Final batch pushed successfully!"
-                    break
-                  else
-                    echo "    ⚠️ Push failed, attempt $PUSH_RETRY/5..."
-                    sleep $((3 + RANDOM % 7))
-                    git fetch origin "$BRANCH" --quiet 2>/dev/null || true
-                    git reset --hard origin/"$BRANCH" 2>/dev/null || true
-                    mkdir -p downloads
-                    cp -r "$BACKUP_DIR"/* downloads/ 2>/dev/null || true
-                    for BF in "${BATCH_FILES[@]}"; do
-                      git add -f "$BF" 2>/dev/null || true
-                    done
-                    if ! git diff --cached --quiet 2>/dev/null; then
-                      git commit -m "Add final batch [skip ci]" --quiet 2>/dev/null || true
-                    fi
-                  fi
-                done
-              fi
-            fi
-          }
 
           git fetch origin "$BRANCH"
           git reset --hard origin/"$BRANCH"
 
           mkdir -p downloads
-          cp -r "$BACKUP_DIR"/* downloads/ 2>/dev/null || true
+          if [ -d "$BACKUP_DIR" ] && [ "$(ls -A $BACKUP_DIR 2>/dev/null)" ]; then
+            cp -r "$BACKUP_DIR"/* downloads/
+          fi
 
-          echo "Analyzing files to push..."
-          ALL_FILES=()
+          git add downloads/
+          git add README.md
 
-          while IFS= read -r -d '' FILE; do
-            ALL_FILES+=("$FILE")
-          done < <(find downloads -name "README.md" -print0 2>/dev/null)
-
-          while IFS= read -r -d '' FILE; do
-            ALL_FILES+=("$FILE")
-          done < <(find downloads -type f \( -name "*.zip" -o -name "*.z[0-9][0-9]" -o -name "*.z[0-9]" -o -name "*.mp4" -o -name "*.mp3" -o -name "*.m4a" -o -name "*.exe" -o -name "*.iso" -o -name "*.tar*" -o -name "*.rar" -o -name "*.bin" -o -name "*.dmg" \) -print0 2>/dev/null | sort -z)
-
-          TOTAL_FILES=${#ALL_FILES[@]}
-          echo "📁 Found $TOTAL_FILES files to push"
-
-          if [ $TOTAL_FILES -eq 0 ]; then
-            git add README.md 2>/dev/null || true
-            if ! git diff --cached --quiet 2>/dev/null; then
-              git commit -m "Update README [skip ci]"
-              timeout 120 git push origin HEAD:"$BRANCH" || true
-            fi
-            echo "ℹ️ No download files to push"
+          if git diff --cached --quiet; then
+            echo "ℹ️ No changes to commit"
             exit 0
           fi
 
-          TOTAL_SIZE=0
-          for F in "${ALL_FILES[@]}"; do
-            if [ -f "$F" ]; then
-              FSIZE=$(stat -c%s "$F" 2>/dev/null || echo 0)
-              TOTAL_SIZE=$((TOTAL_SIZE + FSIZE))
+          git commit -m "Add downloaded files [skip ci]"
+
+          MAX_RETRIES=5
+          for ((attempt=1; attempt<=MAX_RETRIES; attempt++)); do
+            echo "Push attempt $attempt of $MAX_RETRIES"
+            if git push origin HEAD:"$BRANCH"; then
+              echo "✅ Push successful!"
+              exit 0
+            else
+              echo "⚠️ Push failed, retrying..."
+              sleep 5
+              git fetch origin "$BRANCH"
+              git reset --hard origin/"$BRANCH"
+              mkdir -p downloads
+              if [ -d "$BACKUP_DIR" ]; then
+                cp -r "$BACKUP_DIR"/* downloads/
+              fi
+              git add downloads/
+              git add README.md
+              git commit -m "Add downloaded files [skip ci]" || true
             fi
           done
-          TOTAL_SIZE_MB=$((TOTAL_SIZE / 1024 / 1024))
-          echo "📊 Total size: ${TOTAL_SIZE_MB} MB"
 
-          if [ $TOTAL_SIZE_MB -lt 100 ]; then
-            echo "📤 Small upload - pushing all at once..."
-
-            git add -f -A downloads/
-            git add README.md
-
-            if ! git diff --cached --quiet; then
-              git commit -m "Downloaded files [skip ci]"
-
-              PUSH_RETRY=0
-              while [ $PUSH_RETRY -lt 10 ]; do
-                PUSH_RETRY=$((PUSH_RETRY + 1))
-                if timeout 300 git push origin HEAD:"$BRANCH"; then
-                  echo "✅ Push successful!"
-                  break
-                else
-                  echo "⚠️ Push failed, retry $PUSH_RETRY/10..."
-                  sleep $((3 + RANDOM % 7))
-                  git fetch origin "$BRANCH"
-                  git reset --hard origin/"$BRANCH"
-                  mkdir -p downloads
-                  cp -r "$BACKUP_DIR"/* downloads/ 2>/dev/null || true
-                  git add -f -A downloads/
-                  git add README.md
-                  if ! git diff --cached --quiet; then
-                    git commit -m "Downloaded files [skip ci]"
-                  fi
-                fi
-              done
-            fi
-
-          else
-            echo "📤 Large upload (${TOTAL_SIZE_MB}MB) - using incremental batch push..."
-            push_batch "${ALL_FILES[@]}"
-
-            echo ""
-            echo "📤 Pushing README files..."
-            git fetch origin "$BRANCH" --quiet 2>/dev/null || true
-            git reset --hard origin/"$BRANCH" 2>/dev/null || true
-            mkdir -p downloads
-            cp -r "$BACKUP_DIR"/* downloads/ 2>/dev/null || true
-
-            regenerate_downloads_readme
-            git add -f downloads/README.md
-            git add README.md
-
-            if ! git diff --cached --quiet 2>/dev/null; then
-              git commit -m "Update download list [skip ci]" --quiet 2>/dev/null || true
-
-              PUSH_RETRY=0
-              while [ $PUSH_RETRY -lt 5 ]; do
-                PUSH_RETRY=$((PUSH_RETRY + 1))
-                if timeout 60 git push origin HEAD:"$BRANCH" 2>&1; then
-                  echo "✅ README pushed!"
-                  break
-                else
-                  echo "⚠️ README push failed, retry $PUSH_RETRY/5..."
-                  sleep 3
-                fi
-              done
-            fi
-          fi
-
-          echo ""
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-          echo "✅ All files pushed successfully!"
-          echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+          echo "❌ Failed to push after $MAX_RETRIES attempts"
+          exit 1
 
       - name: Final summary
         run: |
